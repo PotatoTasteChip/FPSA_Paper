@@ -1,2 +1,4 @@
 # Only ignore PyTorch model files
 *.pt
+Dataset/*
+!Dataset/.gitkeep
