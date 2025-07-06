@@ -2,3 +2,19 @@
 *.pt
 Dataset/*
 !Dataset/.gitkeep
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Jupyter notebook checkpoint
+.ipynb_checkpoints/
+
+# VSCode settings
+.vscode/
+
+# Mac/Linux/Windows system files
+.DS_Store
+Thumbs.db
