@@ -12,9 +12,9 @@ if __name__ == '__main__':
     device = '0'  # 0번과 1번 GPU를 사용하도록 명시적으로 지정
     data_name = "4875"
     experiment_name = "experiment_1"
-    config_name = "fpsa_1_1"
+    config_name = "fpsa_1_1m"
     model_name = "yolo11m"
-    model = YOLO(f'./configs/{config_name}.yaml').load(f'../pretrained_model/{model_name}.pt')
+    model = YOLO(f'./configs/{config_name}.yaml').load(f'{model_name}.pt')
 
     try:
         # Linux 

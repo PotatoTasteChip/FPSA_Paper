@@ -68,41 +68,40 @@ class PhaseIFFT_1(nn.Module):
     • 출력  : [B, c2, H, W]  (c2=1 또는 3 등)
     """
 
-    def __init__(self,
-                 c1: int,                      # parse_model 이 넘겨주는 입력 채널
-                 c2: int = 1,                  # 원하는 출력 채널(1 or 3)
-                 keep_rgb_channels: bool = False,
-                 eps: float = 1e-6,
-                 norm: bool = True):
+class PhaseIFFT_1(nn.Module):
+    def __init__(self, c1, c2=1, keep_rgb_channels=False,
+                 eps=1e-6, norm=True):
         super().__init__()
         self.c2, self.keep_rgb = c2, keep_rgb_channels
         self.eps, self.norm = eps, norm
+        self.register_buffer("rgb2y",
+                             torch.tensor([0.2989, 0.5870, 0.1140]).view(1, 3, 1, 1))
 
-        # RGB → Y 변환 계수 (표준 Rec.601)
-        self.register_buffer(
-            "rgb2y", torch.tensor([0.2989, 0.5870, 0.1140]).view(1, 3, 1, 1)
-        )
-
-    # --------------------------------------------------------------------- #
-    def forward(self, x: torch.Tensor) -> torch.Tensor:           # [B,C,H,W]
-        # ① RGB → Y (입력이 이미 1채널이면 skip)
+    def forward(self, x):                   # [B,C,H,W]
+        orig_dtype = x.dtype                # 🔑 원본 dtype 기억 (Half or Float)
+        # ① RGB→Y
         if x.shape[1] == 3:
-            x = (x * self.rgb2y.to(x.dtype)).sum(1, keepdim=True)  # → [B,1,H,W]
+            x = (x * self.rgb2y.to(x.dtype)).sum(1, keepdim=True)
 
-        # ② FFT → ③ 위상만 남겨 IFFT
-        F = fft.fft2(x, norm='ortho')
-        y = fft.ifft2(torch.exp(1j * torch.angle(F)), norm='ortho').real
+        # ② FFT 연산만 float32로 수행
+        x32 = x.float()
+        with torch.cuda.amp.autocast(enabled=False):  # <-- AMP off locally
+            F = torch.fft.fft2(x32, norm='ortho')
+            y = torch.fft.ifft2(torch.exp(1j * torch.angle(F)),
+                                norm='ortho').real
 
-        # ④ Min-Max 0-1 정규화 (배치·채널별)
-        if self.norm:
-            mn, mx = y.amin((2, 3), keepdim=True), y.amax((2, 3), keepdim=True)
-            y = (y - mn) / (mx - mn + self.eps)
+            if self.norm:
+                mn = y.amin((2, 3), keepdim=True)
+                mx = y.amax((2, 3), keepdim=True)
+                y = (y - mn) / (mx - mn + self.eps)
 
-        # ⑤ 필요하면 채널 복제 (c2 가 1이면 그대로, 3이면 repeat)
+        # ③ 채널 복제
         if self.c2 > 1:
             y = y.repeat(1, self.c2 // y.shape[1], 1, 1)
 
-        return y.to(dtype=x.dtype)      # dtype 정합성 유지
+        # ④ 원본 dtype(Half) 로 복귀
+        return y.to(orig_dtype)
+
 #############################################################################################
 class DFL(nn.Module):
     """
