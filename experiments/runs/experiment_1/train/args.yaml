@@ -1,18 +1,18 @@
 task: detect
 mode: train
-model: ./configs/test.yaml
+model: ./configs/fpsa_1_1.yaml
 data: ./Dataset/4875/data.yaml
 epochs: 1500
 time: null
 patience: 100
-batch: 16
+batch: 28
 imgsz: 640
 save: true
 save_period: 5
 cache: false
 device: '0'
 workers: 23
-project: ./experiments/runs/experiment_test
+project: ./experiments/runs/experiment_1
 name: train
 exist_ok: false
 pretrained: ../pretrained_model/yolo11m.pt
@@ -102,4 +102,4 @@ auto_augment: randaugment
 erasing: 0.4
 cfg: null
 tracker: botsort.yaml
-save_dir: experiments/runs/experiment_test/train
+save_dir: experiments/runs/experiment_1/train

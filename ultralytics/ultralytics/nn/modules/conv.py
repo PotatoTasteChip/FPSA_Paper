@@ -25,7 +25,15 @@ __all__ = (
     "Index",
 )
 
+import torch
+import torch.nn as nn
+from typing import List
 
+##################################
+
+# custom
+
+###########################################
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
     """Pad to 'same' shape outputs."""
     if d > 1:

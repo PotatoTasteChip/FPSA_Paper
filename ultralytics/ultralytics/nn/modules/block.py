@@ -6,13 +6,14 @@ from typing import List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import torch.fft as fft
 from ultralytics.utils.torch_utils import fuse_conv_and_bn
 
 from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad
 from .transformer import TransformerBlock
 
 __all__ = (
+    "PhaseIFFT_1",
     "DFL",
     "HGBlock",
     "HGStem",
@@ -52,9 +53,57 @@ __all__ = (
     "PSA",
     "SCDown",
     "TorchVision",
+    
 )
 
 
+
+# custom
+class PhaseIFFT_1(nn.Module):
+    """
+    Phase-only inverse FFT preprocessing block.
+
+    • 입력  : RGB 3채널 또는 1채널 그레이([B,C,H,W])
+    • 처리  : RGB→Y → 2-D FFT → 위상만 남기고 진폭=1 로 재구성 → IFFT → (옵션) Min-Max 정규화
+    • 출력  : [B, c2, H, W]  (c2=1 또는 3 등)
+    """
+
+    def __init__(self,
+                 c1: int,                      # parse_model 이 넘겨주는 입력 채널
+                 c2: int = 1,                  # 원하는 출력 채널(1 or 3)
+                 keep_rgb_channels: bool = False,
+                 eps: float = 1e-6,
+                 norm: bool = True):
+        super().__init__()
+        self.c2, self.keep_rgb = c2, keep_rgb_channels
+        self.eps, self.norm = eps, norm
+
+        # RGB → Y 변환 계수 (표준 Rec.601)
+        self.register_buffer(
+            "rgb2y", torch.tensor([0.2989, 0.5870, 0.1140]).view(1, 3, 1, 1)
+        )
+
+    # --------------------------------------------------------------------- #
+    def forward(self, x: torch.Tensor) -> torch.Tensor:           # [B,C,H,W]
+        # ① RGB → Y (입력이 이미 1채널이면 skip)
+        if x.shape[1] == 3:
+            x = (x * self.rgb2y.to(x.dtype)).sum(1, keepdim=True)  # → [B,1,H,W]
+
+        # ② FFT → ③ 위상만 남겨 IFFT
+        F = fft.fft2(x, norm='ortho')
+        y = fft.ifft2(torch.exp(1j * torch.angle(F)), norm='ortho').real
+
+        # ④ Min-Max 0-1 정규화 (배치·채널별)
+        if self.norm:
+            mn, mx = y.amin((2, 3), keepdim=True), y.amax((2, 3), keepdim=True)
+            y = (y - mn) / (mx - mn + self.eps)
+
+        # ⑤ 필요하면 채널 복제 (c2 가 1이면 그대로, 3이면 repeat)
+        if self.c2 > 1:
+            y = y.repeat(1, self.c2 // y.shape[1], 1, 1)
+
+        return y.to(dtype=x.dtype)      # dtype 정합성 유지
+#############################################################################################
 class DFL(nn.Module):
     """
     Integral module of Distribution Focal Loss (DFL).

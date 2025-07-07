@@ -7,12 +7,12 @@ import os
 if __name__ == '__main__':
     # GPU 설정 (여러 GPU 사용 가능)
     epochs = 1500
-    batch = 16
+    batch = 28
     imgsz = 640
     device = '0'  # 0번과 1번 GPU를 사용하도록 명시적으로 지정
     data_name = "4875"
-    experiment_name = "experiment_test"
-    config_name = "test"
+    experiment_name = "experiment_1"
+    config_name = "fpsa_1_1"
     model_name = "yolo11m"
     model = YOLO(f'./configs/{config_name}.yaml').load(f'../pretrained_model/{model_name}.pt')
 
