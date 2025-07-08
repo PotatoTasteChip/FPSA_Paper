@@ -1,8 +1,20 @@
-# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
-
-# Ultralytics YOLO11 object detection model with P3/8 - P5/32 outputs
-# Model docs: https://docs.ultralytics.com/models/yolo11
-# Task docs: https://docs.ultralytics.com/tasks/detect
+# ========================================================================================#
+# fpsa_1_1,yaml 모델 구조 요약
+# ========================================================================================#
+# 1. 입력 RGB 이미지를 두 갈래로 분기:
+#     (1) RGB → 일반 YOLOv11 백본 (P3, P4, P5 생성)
+#     (2) RGB → Gray → FFT → Phase-only 역변환 → 별도 백본 (P3', P4', P5' 생성)
+#
+#  2. 두 branch에서 나온 feature maps를 단계별로 병합(#24~#26): 
+#     - P3  = RGB_P3 + Phase_P3 (Concat)
+#     - P4  = RGB_P4 + Phase_P4 (Concat)
+#     - P5  = RGB_P5 + Phase_P5 (Concat)
+#
+#  3. 기존 YOLOv11 헤드 구조를 통한 업샘플링/병합 → 최종 Detect 수행
+#
+# - 모듈:
+#     - PhaseIFFT_1: FFT 후 phase만 남기고(amplitude =1) IFFT (1채널)
+# ========================================================================================#
 
 # Parameters
 nc: 80 # number of classes
