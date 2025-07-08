@@ -19,6 +19,7 @@ Examples:
 
 from .block import (
     ###########################
+    Multiply,
     GatedAdd,
     PhaseIFFTStack,
     ChSelect,
@@ -112,6 +113,7 @@ from .transformer import (
 )
 
 __all__ = (
+    "Multiply",
     "GatedAdd",
     "PhaseIFFTStack",
     "ChSelect",

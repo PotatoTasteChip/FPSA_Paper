@@ -13,6 +13,7 @@ from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad
 from .transformer import TransformerBlock
 
 __all__ = (
+    "Multiply",
     "GataAdd",
     "PhaseIFFTStack",
     "ChSelect",
@@ -58,6 +59,34 @@ __all__ = (
     "TorchVision",
     
 )
+
+# custom
+class Multiply(nn.Module):
+    """
+    Multiply: out = x * mask
+
+    Args in YAML  →  [c2]
+        c1 : 입력 채널 (파서가 자동 전달)
+        c2 : 0 또는 -1  →  입력과 동일 (권장)
+             >0        →  강제로 지정 (입력·마스크 채널 수와 같아야 함)
+    입력  : [x, mask]  리스트 또는 튜플 (shape, dtype 동일 권장)
+    출력  : x와 동일 shape (x * mask)
+    """
+    def __init__(self, c1: int, c2: int = 0):
+        super().__init__()
+        self.c2 = c1 if c2 in (0, -1) else int(c2)
+        if self.c2 != c1:
+            raise ValueError("Multiply: c2 must equal c1 (채널 불일치)")
+
+    def forward(self, inputs):
+        if not isinstance(inputs, (list, tuple)) or len(inputs) != 2:
+            raise ValueError("Multiply expects two inputs: [x, mask]")
+        x, m = inputs
+
+        if x.shape != m.shape:
+            raise ValueError(f"Multiply shape mismatch: x {x.shape} vs mask {m.shape}")
+
+        return x * m
 
 # custom
 class GatedAdd(nn.Module):
