@@ -50,7 +50,7 @@ for cls_id, name in names.items():
 df = pd.DataFrame(per_class_results)
 
 # 저장 경로 생성
-output_dir = f'../experiments/csv/{experiment_name}'
+output_dir = f'../experiments/{experiment_name}/csv'
 os.makedirs(output_dir, exist_ok=True)  # 디렉터리 없으면 생성
 
 # CSV 저장

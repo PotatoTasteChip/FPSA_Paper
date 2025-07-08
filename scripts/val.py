@@ -4,6 +4,7 @@ from ultralytics import YOLO
 
 data_name = '4875'
 experiment_name = "experiment_1"
+
 # 모델 로드
 model = YOLO(f"../experiments/runs/{experiment_name}/train/weights/best.pt")
 
@@ -50,7 +51,7 @@ for cls_id, name in names.items():
 df = pd.DataFrame(per_class_results)
 
 # 저장 경로 생성
-output_dir = f'../experiments/csv/{experiment_name}'
+output_dir = f'../experiments/{experiment_name}/csv'
 os.makedirs(output_dir, exist_ok=True)  # 디렉터리 없으면 생성
 
 # CSV 저장
