@@ -1,0 +1,110 @@
+# ========================================================================================#
+# fpsa_2.yaml  ―  모델 구조 요약 (v2, GatedAdd-Attention 버전)
+# ========================================================================================#
+# 1. 입력 RGB 이미지를 두 갈래로 분기
+#    ├─ (A)  RGB  ➜  YOLO-V11 일반 백본                         →  P3, P4, P5
+#    └─ (B)  RGB  ➜  Gray ➜ FFT ➜ PhaseIFFTStack(저·중·고)      →  P3′, P4′, P5′
+#
+# 2. PhaseIFFTStack 출력(3채널) → ChSelect 로 각 대역 선택
+#    ├─ High  : AvgPool (8×) ➜ 1×1 Conv 512 ➜ Sigmoid → 80×80 마스크
+#    ├─ Mid   : AvgPool (16×)➜ 1×1 Conv 512 ➜ Sigmoid → 40×40 마스크
+#    └─ Low   : AvgPool (32×)➜ 1×1 Conv 1024➜ Sigmoid → 20×20 마스크
+#
+# 3. RGB-백본 피처와 위 마스크를 GatedAdd(x + x·mask) 로 결합
+#    ├─ P3_fused = GatedAdd( RGB_P3 , High-Mask )   → 80×80×512
+#    ├─ P4_fused = GatedAdd( RGB_P4 , Mid-Mask  )   → 40×40×512
+#    └─ P5_fused = GatedAdd( RGB_P5 , Low-Mask  )   → 20×20×1024
+#
+# 4. Neck & Head
+#    • SPPF + C2PSA 로 P5 강화
+#    • Upsample-Concat(NAS-FPN 스타일)로 P3/P4/P5 다중스케일 결합
+#    • Detect head(3-scale) → 최종 검출
+#
+# ※ 변경점
+#    • PhaseIFFTStack → 한 번의 FFT 로 3대역 IFFT 생성
+#    • GatedAdd 모듈  → feature × (1+mask)  잔차 게이팅
+#    • Mask 생성은 1채널 IFFT출력을 1×1 Conv 로 폭넓혀 Sigmoid
+#    • 모든 mask/feature 해상도 정합(80·40·20) & 채널 정합(512·512·1024)
+# ========================================================================================#
+
+# Parameters
+nc: 80 # number of classes
+scales: # model compound scaling constants, i.e. 'model=yolo11n.yaml' will call yolo11.yaml with scale 'n'
+  # [depth, width, max_channels]
+  #n: [0.50, 0.25, 1024] # summary: 181 layers, 2624080 parameters, 2624064 gradients, 6.6 GFLOPs
+  #s: [0.50, 0.50, 1024] # summary: 181 layers, 9458752 parameters, 9458736 gradients, 21.7 GFLOPs
+  m: [0.50, 1.00, 512] # summary: 231 layers, 20114688 parameters, 20114672 gradients, 68.5 GFLOPs
+  #l: [1.00, 1.00, 512] # summary: 357 layers, 25372160 parameters, 25372144 gradients, 87.6 GFLOPs
+  #x: [1.00, 1.50, 512] # summary: 357 layers, 56966176 parameters, 56966160 gradients, 196.0 GFLOPs
+
+backbone:
+  # 0) RGB 그대로 pass → Identity (3ch)
+  - [-1, 1, nn.Identity, []] # 0
+
+  ## low, mid, high frequency ifft featuremap 획득
+  - [ -1, 1, PhaseIFFTStack, [3, 0.1, 0.4, True] ] #1 result -> band pass 활용해 3채널로 출력 idx[low, mid, high]: 한번의 fft만 적용하기 위해
+  
+  ## high freq ifft featuremap 처리
+  - [ 1, 1, ChSelect, [1, 2] ] # 2: arg[cout, featuremap index=2=high]
+  - [-1, 1, nn.AvgPool2d, [8, 8]] # 3: 평균값 기반 다운샘플링-> 8커널 8stride avg pooling -> 640x640x1 -> 80x80x1
+  - [-1, 1, Conv, [512, 1, 1]]  # 4: out_channels=512, kernel_size=1, stride=1 -> 80x80x512
+  - [-1, 1, nn.Sigmoid, []] # 5: sigmoid -> attention mask
+
+  ## mid freq ifft featuremap 처리
+  - [ 1, 1, ChSelect, [1, 1] ] # 6: arg[cout, featuremap index=1=mid]
+  - [-1, 1, nn.AvgPool2d, [16, 16]] # 7: 평균값 기반 다운샘플링-> 16커널 16stride avg pooling -> 640x640x1 -> 40x40x1
+  - [-1, 1, Conv, [512, 1, 1]]  # 8: out_channels=512, kernel_size=1, stride=1 -> 40x40x512
+  - [-1, 1, nn.Sigmoid, []] # 9: sigmoid -> attention mask
+
+  ## low freq ifft featuremap 처리
+  - [ 1, 1, ChSelect, [1, 0] ] # 10: arg[cout, featuremap index=0=low]
+  - [-1, 1, nn.AvgPool2d, [32, 32]] # 11: 평균값 기반 다운샘플링-> 32커널 32stride avg pooling -> 640x640x1 -> 20x20x1
+  - [-1, 1, Conv, [1024, 1, 1]]  # 12: out_channels=1024, kernel_size=1, stride=1 -> 20x20x1024
+  - [-1, 1, nn.Sigmoid, []] # 13: sigmoid -> attention mask
+
+  ## 정리 ## 
+  # 5: high attention mask
+  # 9: mid attention mask
+  # 13: low attention mask
+
+  ## RGB YOLO11 backbone ##
+  - [0, 1, Conv, [64, 3, 2]]                   # 14  
+  - [-1, 1, Conv, [128, 3, 2]]                 # 15
+  - [-1, 2, C3k2, [256, False, 0.25]]          # 16: P2
+
+  - [-1, 1, Conv, [256, 3, 2]]                 # 17
+  - [-1, 2, C3k2, [512, False, 0.25]]          # 18: P3 80x80x512
+  - [[18, 5], 1, GatedAdd, [0]]                # 19: Fused P3
+
+  - [-1, 1, Conv, [512, 3, 2]]                 # 20
+  - [-1, 2, C3k2, [512, True]]                 # 21: P4 40x40x512
+  - [[21, 9], 1, GatedAdd, [0]]                # 22: Fused P4
+
+
+  - [-1, 1, Conv, [1024, 3, 2]]                # 23
+  - [-1, 2, C3k2, [1024, True]]                # 24: P5 20x20x1024
+  - [[24,13], 1, GatedAdd, [0]]                # 25: Fused P5
+
+  - [-1, 1, SPPF, [1024, 5]]                   # 26
+  - [-1, 2, C2PSA, [1024]]                     # 27
+
+
+
+head:
+  - [27, 1, nn.Upsample, [None, 2, "nearest"]]    # 28: upsample fused P5
+  - [[-1, 22], 1, Concat, [1]]                    # 29
+  - [-1, 2, C3k2, [512, False]]                   # 30
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]    # 31
+  - [[-1, 19], 1, Concat, [1]]                    # 32
+  - [-1, 2, C3k2, [256, False]]                   # 33 (final P3/8-small)
+
+  - [-1, 1, Conv, [256, 3, 2]]                    # 34
+  - [[-1, 30], 1, Concat, [1]]                    # 35
+  - [-1, 2, C3k2, [512, False]]                   # 36 (final P4/16-medium)
+
+  - [-1, 1, Conv, [512, 3, 2]]                    # 37
+  - [[-1, 27], 1, Concat, [1]]                    # 38
+  - [-1, 2, C3k2, [1024, True]]                   # 39 (final P5/32-large)
+
+  - [[33, 36, 39], 1, Detect, [nc]]              # 40

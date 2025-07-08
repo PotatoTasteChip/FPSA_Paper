@@ -12,6 +12,9 @@ import torch.nn as nn
 
 from ultralytics.nn.autobackend import check_class_names
 from ultralytics.nn.modules import (
+    GatedAdd,
+    PhaseIFFTStack,
+    ChSelect,
     PhaseIFFT_1,
     AIFI,
     C1,
@@ -1703,6 +1706,16 @@ def parse_model(d, ch, verbose=True):
                     args.extend((True, 1.2))
             if m is C2fCIB:
                 legacy = False
+        #####################################################################3
+        elif m in {PhaseIFFTStack, ChSelect, GatedAdd}:        # ★ 추가
+            # 이 블록들은 출력 채널을 그대로 써야 한다 → make_divisible 적용 금지
+            if isinstance(f, list):
+                c1 = ch[f[0]]          # 두 입력 채널이 같다고 가정
+            else:
+                c1 = ch[f]
+            c2 = args[0] if args and args[0] not in (0, -1) else c1
+            args = [c1, c2, *args[1:]]     # PhaseIFFTStack(c1,c2, ...)
+        #########################################################################
         elif m is AIFI:
             args = [ch[f], *args]
         elif m in frozenset({HGStem, HGBlock}):

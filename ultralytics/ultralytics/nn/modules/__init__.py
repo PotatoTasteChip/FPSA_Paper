@@ -19,6 +19,9 @@ Examples:
 
 from .block import (
     ###########################
+    GatedAdd,
+    PhaseIFFTStack,
+    ChSelect,
     PhaseIFFT_1,
     ###########################
     C1,
@@ -63,6 +66,7 @@ from .block import (
     SCDown,
     TorchVision,
 )
+
 from .conv import (
     #############
     ###############
@@ -108,6 +112,9 @@ from .transformer import (
 )
 
 __all__ = (
+    "GatedAdd",
+    "PhaseIFFTStack",
+    "ChSelect",
     "PhaseIFFT_1",
     "Conv",
     "Conv2",

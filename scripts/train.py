@@ -7,14 +7,14 @@ import os
 if __name__ == '__main__':
     # GPU 설정 (여러 GPU 사용 가능)
     epochs = 1500
-    batch = 28
+    batch = 40
     imgsz = 640
     device = '0'  # 0번과 1번 GPU를 사용하도록 명시적으로 지정
     data_name = "4875"
-    experiment_name = "experiment_1"
-    config_name = "fpsa_1_1m"
+    experiment_name = "experiment_2"
+    config_name = "fpsa_2m"
     model_name = "yolo11m"
-    model = YOLO(f'./configs/{config_name}.yaml').load(f'{model_name}.pt')
+    model = YOLO(f'../configs/{config_name}.yaml').load(f'{model_name}.pt')
 
     try:
         # Linux 
@@ -31,7 +31,7 @@ if __name__ == '__main__':
 
     # 데이터 증강 설정
     results = model.train(
-        data=f'./Dataset/{data_name}/data.yaml',
+        data=f'../Dataset/{data_name}/data.yaml',
         epochs=epochs,
         batch=batch,
         imgsz=imgsz,
@@ -41,16 +41,7 @@ if __name__ == '__main__':
         amp=True,                # Mixed Precision (AMP) 활성화
         save=True,
         save_period=5,
-        project=f'./experiments/runs/{experiment_name}',    # TensorBoard 로그가 저장될 디렉터리 경로 지정
+        project=f'../experiments/{experiment_name}',    # TensorBoard 로그가 저장될 디렉터리 경로 지정
         name=f'train',          # 실험 이름 지정 (해당 디렉터리에 저장됨)
-        flipud=0.0,              # 수직 반전 확률
-        fliplr=0.5,              # 수평 반전 확률
-        degrees=10.0,            # 회전 각도 범위
-        scale=0.5,               # 확대/축소 비율
-        translate=0.1,           # 이동 비율
-        shear=2.0,               # 왜곡 비율
-        hsv_h=0.015,             # 색상 변화 범위
-        hsv_s=0.7,               # 채도 변화 범위
-        hsv_v=0.4,               # 밝기 변화 범위
         patience=100,  # Early Stopping을 위한 patience 설정 (예: 50 에포크)
     )

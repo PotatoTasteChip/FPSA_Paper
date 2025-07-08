@@ -13,6 +13,9 @@ from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad
 from .transformer import TransformerBlock
 
 __all__ = (
+    "GataAdd",
+    "PhaseIFFTStack",
+    "ChSelect",
     "PhaseIFFT_1",
     "DFL",
     "HGBlock",
@@ -56,17 +59,107 @@ __all__ = (
     
 )
 
+# custom
+class GatedAdd(nn.Module):
+    """
+    out = x + x * mask     (= x * (1 + mask))
+
+    Args in YAML  →  [c2]
+        c1 : 입력 채널(파서가 자동 전달, 여기선 검증용)
+        c2 : 0 또는 -1  →  입력과 동일(권장)
+             >0        →  강제로 지정(입력·마스크 채널 수와 같아야 함)
+    입력  : [x, mask]  리스트/튜플  (shape, dtype 동일 권장)
+    출력  : x와 동일 shape
+    """
+    def __init__(self, c1: int, c2: int = 0):
+        super().__init__()
+        self.c2 = c1 if c2 in (0, -1) else int(c2)
+        if self.c2 != c1:
+            raise ValueError("GatedAdd: c2 must equal c1 (채널 불일치)")
+
+    def forward(self, inputs):
+        # parse_model()이 [x, mask] 형태로 넘겨줌
+        if not isinstance(inputs, (list, tuple)) or len(inputs) != 2:
+            raise ValueError("GatedAdd expects two inputs: [x, mask]")
+        x, m = inputs
+
+        # 채널·공간 크기 검사(디버깅용, 실사용 땐 주석 가능)
+        if x.shape != m.shape:
+            raise ValueError(f"GatedAdd shape mismatch: x {x.shape} vs mask {m.shape}")
+
+        return x * (1 + m)
 
 
 # custom
-class PhaseIFFT_1(nn.Module):
+class ChSelect(nn.Module):
     """
-    Phase-only inverse FFT preprocessing block.
+    Channel-Select (1채널 고정)
 
-    • 입력  : RGB 3채널 또는 1채널 그레이([B,C,H,W])
-    • 처리  : RGB→Y → 2-D FFT → 위상만 남기고 진폭=1 로 재구성 → IFFT → (옵션) Min-Max 정규화
-    • 출력  : [B, c2, H, W]  (c2=1 또는 3 등)
+    Args (YAML)
+        c1      : 입력 채널 수 (자동 전달, 실제 사용 X)
+        c2      : 무시되지만 시그니처 유지를 위해 둠
+        index   : 선택할 채널 인덱스  (default=0)
+    출력
+        [B,1,H,W]  — 선택된 단일 채널
     """
+
+    def __init__(self, c1: int, c2: int = 1, index: int = 0):
+        super().__init__()
+        self.index = index          # 보통 0, 1, 2 중 하나
+        self.c2 = 1                 # ← 항상 1로 고정
+
+    def forward(self, x):
+        # x: [B,C,H,W]    →  y: [B,1,H,W]
+        return x[:, self.index:self.index + 1, :, :]
+
+
+# custom   
+class PhaseIFFTStack(nn.Module):
+    """
+    FFT 한 번 → 대역(mask) 3개 → IFFT → [B,3,H,W] (low, mid, high)
+
+    YAML Args
+        c1          (자동) 입력 채널
+        c2          (무시) 항상 3 채널 출력
+        cut_low     저역 반경 (0~0.5)   default=0.1
+        cut_high    고역 반경           default=0.4
+        norm        True → 0~1 정규화
+    """
+    def __init__(self, c1, c2=3, cut_low=0.1, cut_high=0.4, norm=True, eps=1e-6):
+        super().__init__()
+        self.cut_low, self.cut_high = cut_low, cut_high
+        self.norm, self.eps = norm, eps
+        self.register_buffer("rgb2y",
+            torch.tensor([0.2989, 0.5870, 0.1140]).view(1,3,1,1))
+        self.c2 = 3                         # 항상 3ch 출력
+
+    # ── 내부: 마스크 만들기
+    def _masks(self, H, W, dev):
+        fy = torch.fft.fftfreq(H, device=dev).view(-1,1).repeat(1,W)
+        fx = torch.fft.fftfreq(W, device=dev).view(1,-1).repeat(H,1)
+        r  = torch.fft.fftshift((fx**2 + fy**2).sqrt())
+        low  = (r <= self.cut_low)
+        mid  = (r >  self.cut_low) & (r <= self.cut_high)
+        high = (r >  self.cut_high)
+        return low, mid, high
+
+    @torch.cuda.amp.autocast(enabled=False)
+    def forward(self, x):
+        # RGB→Gray
+        if x.shape[1] == 3:
+            x = (x * self.rgb2y.to(x.dtype)).sum(1, keepdim=True)
+        F = torch.fft.fft2(x.float(), norm='ortho')
+
+        outs = []
+        for m in self._masks(x.shape[2], x.shape[3], x.device):
+            comp = torch.fft.ifftshift(F * m)   # 진폭·위상 모두 사용
+            y = torch.fft.ifft2(comp, norm='ortho').real
+            if self.norm:
+                mn, mx = y.amin((2,3),True), y.amax((2,3),True)
+                y = (y-mn)/(mx-mn + self.eps)
+            outs.append(y)
+        return torch.cat(outs, 1).to(x.dtype)   # [B,3,H,W]
+    
 
 class PhaseIFFT_1(nn.Module):
     def __init__(self, c1, c2=1, keep_rgb_channels=False,
